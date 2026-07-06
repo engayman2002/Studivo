@@ -1,72 +1,72 @@
-# دليل تشغيل وتثبيت منصة Studivo (Deployment Guide)
+# Studivo Platform Deployment & Installation Guide
 
-مرحباً بك في دليل التثبيت الشامل لمنصة **Studivo** (لوحة التحكم للطلاب والمستشارين). هذا الدليل يشرح بالتفصيل بنية المشروع (Architecture)، وكيفية تثبيته وتشغيله على أي خادم VPS جديد، سواء قمت بتثبيت الواجهة الخلفية والواجهة الأمامية معاً على نفس السيرفر، أو فصلهما على سيرفرين مختلفين.
+Welcome to the comprehensive deployment guide for the **Studivo** platform (a dashboard control panel for students and advisors). This guide details the project's architecture and explains how to install and run it on any new VPS server, whether you deploy the frontend and backend together on a single server, or split them across different servers.
 
 ---
 
-## 🏗️ البنية العامة للمشروع (Architecture Overview)
+## 🏗️ Architecture Overview
 
-يتكون المشروع من ثلاثة أجزاء رئيسية:
-1. **واجهة المستخدم (studivo-ui)**: مبنية باستخدام Next.js (تشتغل بشكل افتراضي على منفذ `3000`).
-2. **الخادم الخلفي (studivo-server)**: مبني باستخدام Node.js/Express (يشتغل بشكل افتراضي على منفذ `5000`).
-3. **قاعدة البيانات والذاكرة المؤقتة**:
-   - **MongoDB** (المنفذ `27017`): لتخزين المستخدمين، العروض، الطلبات، والرسائل.
-   - **Redis** (المنفذ `6379`): لإدارة صف الطوابير (BullMQ) الخاص بـ Scraper والعمليات المؤقتة.
+The project is composed of three main parts:
+1. **Frontend (studivo-ui)**: A Next.js application running by default on port `3000`.
+2. **Backend API (studivo-server)**: A Node.js/Express API running by default on port `5000`.
+3. **Database & Cache**:
+   - **MongoDB** (Port `27017`): Stores users, offers, requests, and messages.
+   - **Redis** (Port `6379`): Manages the BullMQ scraper queues and active server cache.
 
-### مخطط الاتصال والربط:
+### Connection & Proxy Flow:
 
 ```mermaid
 graph TD
-    User([المستخدم/المتصفح]) -->|منفذ 80/443| Nginx[مستقبل الطلبات Nginx Proxy]
-    Nginx -->|تحويل طلبات الواجهة /| Frontend[Next.js App - Port 3000]
-    Nginx -->|تحويل طلبات الـ API /api| Backend[Express API - Port 5000]
-    Backend -->|تخزين البيانات| MongoDB[(MongoDB - Port 27017)]
-    Backend -->|إرسال مهام Scraper| Redis[(Redis - Port 6379)]
-    Worker[BullMQ Scraper Worker] -->|سحب المهام ومعالجتها| Redis
+    User([User / Browser]) -->|Port 80/443| Nginx[Nginx Reverse Proxy]
+    Nginx -->|Route /| Frontend[Next.js App - Port 3000]
+    Nginx -->|Route /api| Backend[Express API - Port 5000]
+    Backend -->|Store Data| MongoDB[(MongoDB - Port 27017)]
+    Backend -->|Enqueue Tasks| Redis[(Redis - Port 6379)]
+    Worker[BullMQ Scraper Worker] -->|Process Tasks| Redis
 ```
 
 ---
 
-## 🛠️ المتطلبات الأساسية للسيرفر (Prerequisites)
-- خادم يعمل بنظام **Ubuntu 22.04 LTS** أو أحدث.
-- مواصفات الخادم: يُفضل ألا تقل الذاكرة العشوائية (RAM) عن **1 جيجابايت** (مع تفعيل الـ Swap File كما هو موضح بالأسفل لتفادي توقف السيرفر بسبب امتلاء الذاكرة OOM).
+## 🛠️ Prerequisites
+- A server running **Ubuntu 22.04 LTS** or newer.
+- Minimum Specs: **1GB RAM** (activating 2GB Swap Space is highly recommended, as outlined below, to prevent out-of-memory errors during build stages).
 
 ---
 
-## 📋 الخيار الأول: تثبيت المشروع كاملاً على خادم VPS واحد (الخيار الأسهل والأوفر)
+## 📋 Option 1: Single VPS Server Deployment (Monolithic Setup)
 
-في هذا السيناريو، نقوم برفع الواجهة الخلفية والأمامية وقاعدة البيانات والـ Redis على نفس السيرفر باستخدام خادم **Nginx** لتوجيه المرور و **PM2** لإبقاء التطبيقات قيد التشغيل.
+In this scenario, you deploy the Frontend, Backend, Database, and Redis on the same VPS. Nginx acts as a reverse proxy, and PM2 manages the Node.js processes.
 
-### الخطوة 1: تهيئة البيئة وتثبيت الحزم الأساسية
-يمكنك استخدام السكربت الجاهز الذي قمنا بحفظه لك في المجلد `vps-setup/deploy.sh`:
+### Step 1: Environment Initialization & Setup
+You can use the helper script saved under the `vps-setup/` folder:
 ```bash
-# 1. الدخول إلى مجلد المشروع المرفوع
+# 1. Navigate to the setup folder
 cd /var/www/studivo/vps-setup
 
-# 2. إعطاء صلاحية التنفيذ للسكربت
+# 2. Make the script executable
 chmod +x deploy.sh
 
-# 3. تشغيل السكربت كمسؤول (Root) لتثبيت Node.js, MongoDB, Redis, Nginx, PM2 تلقائياً
+# 3. Run the deployment script as root to automatically install Node.js, MongoDB, Redis, Nginx, and PM2
 sudo ./deploy.sh
 ```
 
 > [!NOTE]
-> يقوم السكربت بتهيئة **2GB Swap Memory** تلقائياً وهو أمر بالغ الأهمية إذا كان السيرفر بحجم 1GB RAM لضمان عدم توقف السيرفر أثناء بناء المشروع (npm run build).
+> The setup script configures a **2GB Swap file** automatically. This is essential for a 1GB VPS to avoid OOM crashes when running `npm run build` in Next.js.
 
-### الخطوة 2: استرجاع قاعدة البيانات (Restore MongoDB)
-لقد قمنا بحفظ نسخة احتياطية من قاعدة البيانات الحالية داخل مجلد `db_backup`. لاسترجاعها في السيرفر الجديد:
+### Step 2: Restore MongoDB Database
+A backup of the database is saved under the `db_backup/` directory. To restore it on the new server:
 ```bash
-# تشغيل أمر استرجاع قاعدة البيانات
+# Restore MongoDB from the backup dump
 mongorestore --db studivo /var/www/studivo/db_backup/studivo/
 ```
 
-### الخطوة 3: إعداد ملفات البيئة للـ Backend
-1. اذهب إلى مجلد السيرفر: `cd /var/www/studivo/studivo-server`
-2. أنشئ ملف `.env` وقم بتعبئته بالقيم الحقيقية استناداً إلى الملف المرفق `.env.example`:
+### Step 3: Configure Backend Environment Variables
+1. Navigate to the backend directory: `cd /var/www/studivo/studivo-server`
+2. Create a `.env` file and populate it with real values based on `.env.example`:
 ```env
 PORT=5000
 NODE_ENV=production
-CLIENT_URL=https://yourdomain.com  # رابط الدومين الخاص بك
+CLIENT_URL=https://yourdomain.com  # Your website's frontend domain URL
 MONGODB_URI=mongodb://localhost:27017/studivo
 REDIS_URL=redis://localhost:6379
 JWT_SECRET=your_jwt_secret_key
@@ -74,72 +74,72 @@ JWT_REFRESH_SECRET=your_jwt_refresh_key
 GEMINI_API_KEY=your_gemini_key
 ```
 
-### الخطوة 4: إعداد ملفات البيئة للـ Frontend (Next.js)
-1. اذهب إلى مجلد الواجهة: `cd /var/www/studivo/studivo-ui`
-2. أنشئ ملف `.env.production` وضع فيه عنوان الـ API:
+### Step 4: Configure Frontend Environment Variables
+1. Navigate to the frontend directory: `cd /var/www/studivo/studivo-ui`
+2. Create a `.env.production` file pointing to the backend API endpoint:
 ```env
 NEXT_PUBLIC_API_URL=https://yourdomain.com/api
 ```
 
-### الخطوة 5: تشغيل المشروع باستخدام PM2
-1. انتقل للمجلد الرئيسي: `cd /var/www/studivo`
-2. قم بتثبيت حزم الـ `node_modules` وبناء المشروع:
+### Step 5: Build & Run with PM2
+1. Go back to the root directory: `cd /var/www/studivo`
+2. Install dependencies and build the projects:
 ```bash
-# تثبيت حزم خادم خلفية المشروع
+# Install backend dependencies
 cd studivo-server && npm install --production && cd ..
 
-# تثبيت حزم واجهة المستخدم وعمل بناء لها
+# Install frontend dependencies and build production assets
 cd studivo-ui && npm install && npm run build && cd ..
 ```
-3. تشغيل جميع الخدمات (API, UI, Scraper Worker) بضغطة واحدة باستخدام ملف التهيئة المرفق:
+3. Start all services (API, UI, and Scraper Worker) simultaneously using PM2:
 ```bash
 pm2 start ecosystem.config.js
 pm2 save
 pm2 startup
 ```
 
-### الخطوة 6: إعداد Nginx وشهادة الأمان SSL (Certbot)
-1. انسخ ملف إعدادات Nginx المرفق إلى خادم Nginx الفعلي:
+### Step 6: Configure Nginx & SSL Certificate (Certbot)
+1. Copy the production Nginx config to the sites-available directory:
 ```bash
 sudo cp /var/www/studivo/nginx/studivo.prod.conf /etc/nginx/sites-available/studivo
 sudo ln -sf /etc/nginx/sites-available/studivo /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 ```
-2. قم بتثبيت شهادة SSL مجانية من Let's Encrypt:
+2. Install Let's Encrypt Certbot and generate an SSL Certificate:
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
 ```
-3. أعد تشغيل Nginx:
+3. Restart Nginx to apply changes:
 ```bash
 sudo systemctl reload nginx
 ```
 
 ---
 
-## 🌐 الخيار الثاني: فصل الواجهة الأمامية (Frontend) عن الخلفية (Backend)
+## 🌐 Option 2: Split Server Deployment (Frontend and Backend Separated)
 
-إذا كنت ترغب في توفير موارد السيرفر، أو رفع الـ Frontend على منصة مجانية/سحابية مثل **Vercel** أو **Netlify**، وتشغيل الـ Backend فقط على سيرفر VPS.
+If you want to optimize server resources, you can host the Frontend on a serverless/static platform like **Vercel** or **Netlify** (usually free), and host only the Backend API, Database, and Redis on a VPS server.
 
 ```mermaid
 graph LR
-    User([المستخدم]) -->|زيارة الموقع| Vercel[Vercel / Netlify Frontend]
-    Vercel -->|طلبات API| VPS[VPS Server Backend]
+    User([User]) -->|Visit Site| Vercel[Vercel / Netlify Frontend]
+    Vercel -->|API Requests| VPS[VPS Server Backend]
     VPS --> MongoDB[(MongoDB)]
     VPS --> Redis[(Redis)]
 ```
 
-### 1. إعداد الواجهة الخلفية (Backend VPS)
-على خادم الـ VPS، ستقوم بتثبيت الـ Backend فقط مع قاعدة البيانات والـ Redis.
+### 1. Configure the Backend (VPS API Server)
+On your VPS, you only need to run the API, database, and Redis.
 
-1. **الملف `.env` للـ Backend**:
-   - يجب إعداد الـ `CLIENT_URL` لكي يشير إلى رابط الـ Frontend المرفوع على Vercel أو المنصة الأخرى للسماح بنظام CORS:
+1. **Backend `.env` file configuration**:
+   - Make sure `CLIENT_URL` points to your Vercel/Netlify frontend domain to bypass CORS restrictions:
      ```env
      CLIENT_URL=https://studivo-frontend.vercel.app
      ```
-2. **Nginx للـ Backend**:
-   - ستقوم فقط بتوجيه المنفذ `5000` (الخاص بالـ API) مباشرة تحت الدومين الفرعي (مثلاً `api.yourdomain.com`).
-   - ملف الإعدادات للـ Nginx سيكون بسيطاً جداً:
+2. **Nginx for Backend API**:
+   - Set up Nginx to proxy port `5000` (the API server) on a subdomain (e.g. `api.yourdomain.com`).
+   - Here is a simple Nginx virtual host configuration:
      ```nginx
      server {
          server_name api.yourdomain.com;
@@ -153,47 +153,49 @@ graph LR
          }
      }
      ```
-3. **التشغيل**:
-   - ستقوم فقط بتشغيل الـ `studivo-api` والـ `studivo-worker` باستخدام PM2:
+3. **Running the API**:
+   - Start only `studivo-api` and `studivo-worker` on PM2:
      ```bash
      pm2 start ecosystem.config.js --only "studivo-api,studivo-worker"
      ```
 
-### 2. إعداد الواجهة الأمامية (Frontend on Vercel/Netlify)
-1. قم برفع مجلد `studivo-ui` فقط إلى مستودع GitHub منفصل أو اربطه مباشرة بـ Vercel.
-2. في إعدادات البيئة (Environment Variables) على Vercel، أضف المتغير التالي:
+### 2. Configure the Frontend (Vercel/Netlify Static Hosting)
+1. Push only the `studivo-ui` directory to a clean GitHub repository and link it to Vercel/Netlify.
+2. In the hosting provider's dashboard, configure the following environment variable:
    - **Key**: `NEXT_PUBLIC_API_URL`
-   - **Value**: `https://api.yourdomain.com` (رابط الـ API الخاص بـ VPS السيرفر الخلفي).
-3. ستقوم المنصة ببناء وتشغيل الموقع بشكل تلقائي ومجاني دون استهلاك أي معالج أو ذاكرة من خادم الـ VPS الخاص بك.
+   - **Value**: `https://api.yourdomain.com` (Your backend VPS server subdomain URL).
+3. The platform will build and deploy Next.js automatically, completely freeing up RAM and CPU on your VPS.
 
 ---
 
-## 📝 شرح متغيرات البيئة الهامة (Environment Variables)
+## 📝 Environment Variables Reference
 
-### الواجهة الخلفية (Backend)
-- `MONGODB_URI`: رابط الاتصال بقاعدة البيانات. (إذا كانت محلية: `mongodb://localhost:27017/studivo`).
-- `REDIS_URL`: رابط الاتصال بـ Redis لإدارة طوابير المهام. (محلية: `redis://localhost:6379`).
-- `JWT_SECRET` / `JWT_REFRESH_SECRET`: مفاتيح تشفير عشوائية لتأمين تسجيل دخول المستخدمين.
-- `GEMINI_API_KEY`: مفتاح API الخاص بـ Google Gemini لمعالجة طلبات الذكاء الاصطناعي.
-- `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET`: لتخزين ورفع صور العروض والطلبات سحابياً.
+### Backend Variables (`studivo-server`)
+- `MONGODB_URI`: MongoDB connection string. (Local: `mongodb://localhost:27017/studivo`).
+- `REDIS_URL`: Redis connection URL. (Local: `redis://localhost:6379`).
+- `JWT_SECRET` / `JWT_REFRESH_SECRET`: Random hash keys used for token-based user authentication.
+- `GEMINI_API_KEY`: API key from Google AI Studio used to run Gemini models.
+- `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET`: Cloudinary API configurations used for cloud image uploads.
 
-### الواجهة الأمامية (Frontend)
-- `NEXT_PUBLIC_API_URL`: الرابط الذي تستخدمه الواجهة لإرسال الطلبات إلى السيرفر الخلفي. يجب أن ينتهي بـ `/api`.
+### Frontend Variables (`studivo-ui`)
+- `NEXT_PUBLIC_API_URL`: The URL where the Next.js client directs API requests. Needs to end in `/api`.
 
 ---
 
-## 📊 أوامر إدارة ومراقبة التشغيل اليومية (Useful Commands)
+## 📊 Useful Operations & Monitoring Commands
+
+Use these commands on your VPS server to manage the processes:
 
 ```bash
-# لعرض حالة جميع العمليات
+# Check the status of active PM2 processes
 pm2 status
 
-# لمشاهدة سجلات الأخطاء والتشغيل مباشرة (Logs)
+# Monitor live server logs
 pm2 logs
 
-# لمراقبة استهلاك المعالج والذاكرة بشكل رسومي في الـ Terminal
+# Display CPU and Memory utilization in terminal
 pm2 monit
 
-# لإعادة تشغيل السيرفر بالكامل
+# Restart all running backend applications
 pm2 restart all
 ```
