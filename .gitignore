@@ -41,3 +41,4 @@ playwright-browsers/
 .parcel-cache/
 .vercel
 eyad.txt
+db_backup/
